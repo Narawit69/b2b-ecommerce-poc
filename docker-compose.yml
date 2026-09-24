@@ -1,0 +1,136 @@
+version: '3.8'
+
+services:
+  # 1. Relational Database (PostgreSQL with isolated schemas)
+  postgres:
+    image: postgres:15-alpine
+    container_name: b2b-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: b2b_ecommerce
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. Object Storage (MinIO - S3 Compatible for Product Images)
+  minio:
+    image: minio/minio:RELEASE.2023-09-07T02-05-02Z
+    container_name: b2b-minio
+    restart: always
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadminpassword
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # MinIO Bucket Auto-creator & Public Policy Configurator
+  minio-init:
+    image: minio/mc:latest
+    container_name: b2b-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      /usr/bin/mc alias set myminio http://minio:9000 minioadmin minioadminpassword;
+      /usr/bin/mc mb myminio/b2b-products || true;
+      /usr/bin/mc anonymous set download myminio/b2b-products;
+      exit 0;
+      "
+
+  # 3. Backend: Category Service (CA)
+  ca-service:
+    build:
+      context: ./services/category-service
+      dockerfile: Dockerfile
+    container_name: b2b-ca-service
+    restart: always
+    environment:
+      PORT: 8002
+      DATABASE_URL: postgresql://postgres:postgrespassword@postgres:5432/b2b_ecommerce?schema=category_schema
+      CORS_ORIGIN: "http://localhost:3000"
+    ports:
+      - "8002:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # 4. Backend: Product Service (PD)
+  pd-service:
+    build:
+      context: ./services/product-service
+      dockerfile: Dockerfile
+    container_name: b2b-pd-service
+    restart: always
+    environment:
+      PORT: 8001
+      DATABASE_URL: postgresql://postgres:postgrespassword@postgres:5432/b2b_ecommerce?schema=product_schema
+      CORS_ORIGIN: "http://localhost:3000"
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # 5. Backend: FileStory Service (Media Storage Gateway)
+  filestory-service:
+    build:
+      context: ./services/filestory-service
+      dockerfile: Dockerfile
+    container_name: b2b-filestory-service
+    restart: always
+    environment:
+      PORT: 8003
+      MINIO_ENDPOINT: "minio"
+      MINIO_PORT: 9000
+      MINIO_ACCESS_KEY: "minioadmin"
+      MINIO_SECRET_KEY: "minioadminpassword"
+      MINIO_BUCKET: "b2b-products"
+      MINIO_PUBLIC_URL: "http://localhost:9000/b2b-products"
+      CORS_ORIGIN: "http://localhost:3000"
+    ports:
+      - "8003:8003"
+    depends_on:
+      minio:
+        condition: service_healthy
+
+  # 6. Frontend: Next.js Admin Dashboard & Orchestrator
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: b2b-frontend
+    restart: always
+    environment:
+      PORT: 3000
+      NEXT_PUBLIC_PD_API_URL: "http://localhost:8001"
+      NEXT_PUBLIC_CA_API_URL: "http://localhost:8002"
+      NEXT_PUBLIC_FILESTORY_API_URL: "http://localhost:8003"
+    ports:
+      - "3000:3000"
+    depends_on:
+      - pd-service
+      - ca-service
+      - filestory-service
+
+volumes:
+  postgres_data:
+  minio_data:

@@ -1,0 +1,183 @@
+# ========================================================
+# 1. Category Service (CA)
+# ========================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ca-service-deployment
+  namespace: b2b-ecommerce
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ca-service
+  template:
+    metadata:
+      labels:
+        app: ca-service
+    spec:
+      containers:
+      - name: ca-service
+        image: b2b-ca-service:latest
+        env:
+        - name: PORT
+          value: "8002"
+        - name: DATABASE_URL
+          value: "postgresql://postgres:postgrespassword@postgres:5432/b2b_ecommerce?schema=category_schema"
+        ports:
+        - containerPort: 8002
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ca-service
+  namespace: b2b-ecommerce
+spec:
+  type: ClusterIP
+  selector:
+    app: ca-service
+  ports:
+  - port: 8002
+    targetPort: 8002
+
+---
+# ========================================================
+# 2. Product Service (PD)
+# ========================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pd-service-deployment
+  namespace: b2b-ecommerce
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pd-service
+  template:
+    metadata:
+      labels:
+        app: pd-service
+    spec:
+      containers:
+      - name: pd-service
+        image: b2b-pd-service:latest
+        env:
+        - name: PORT
+          value: "8001"
+        - name: DATABASE_URL
+          value: "postgresql://postgres:postgrespassword@postgres:5432/b2b_ecommerce?schema=product_schema"
+        ports:
+        - containerPort: 8001
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pd-service
+  namespace: b2b-ecommerce
+spec:
+  type: ClusterIP
+  selector:
+    app: pd-service
+  ports:
+  - port: 8001
+    targetPort: 8001
+
+---
+# ========================================================
+# 3. FileStory Service (Media Storage Gateway)
+# ========================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: filestory-deployment
+  namespace: b2b-ecommerce
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: filestory-service
+  template:
+    metadata:
+      labels:
+        app: filestory-service
+    spec:
+      containers:
+      - name: filestory-service
+        image: b2b-filestory-service:latest
+        env:
+        - name: PORT
+          value: "8003"
+        - name: MINIO_ENDPOINT
+          value: "minio"
+        - name: MINIO_PORT
+          value: "9000"
+        - name: MINIO_ACCESS_KEY
+          value: "minioadmin"
+        - name: MINIO_SECRET_KEY
+          value: "minioadminpassword"
+        - name: MINIO_BUCKET
+          value: "b2b-products"
+        ports:
+        - containerPort: 8003
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: filestory-service
+  namespace: b2b-ecommerce
+spec:
+  type: ClusterIP
+  selector:
+    app: filestory-service
+  ports:
+  - port: 8003
+    targetPort: 8003
+
+---
+# ========================================================
+# 4. Frontend (Next.js Admin Dashboard)
+# ========================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-deployment
+  namespace: b2b-ecommerce
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+      - name: frontend
+        image: b2b-frontend:latest
+        env:
+        - name: PORT
+          value: "3000"
+        - name: NEXT_PUBLIC_PD_API_URL
+          value: "http://pd-service:8001"
+        - name: NEXT_PUBLIC_CA_API_URL
+          value: "http://ca-service:8002"
+        - name: NEXT_PUBLIC_FILESTORY_API_URL
+          value: "http://filestory-service:8003"
+        ports:
+        - containerPort: 3000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: b2b-ecommerce
+spec:
+  type: NodePort
+  selector:
+    app: frontend
+  ports:
+  - port: 3000
+    targetPort: 3000
+    nodePort: 30080

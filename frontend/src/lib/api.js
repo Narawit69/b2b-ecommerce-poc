@@ -6,9 +6,10 @@
  * - FileStory Service (Media Gateway for MinIO, Port 8003)
  */
 
-export const PD_API_URL = process.env.NEXT_PUBLIC_PD_API_URL || 'http://localhost:8001';
-export const CA_API_URL = process.env.NEXT_PUBLIC_CA_API_URL || 'http://localhost:8002';
-export const FILESTORY_API_URL = process.env.NEXT_PUBLIC_FILESTORY_API_URL || 'http://localhost:8003';
+const isBrowser = typeof window !== 'undefined';
+export const PD_API_URL = process.env.NEXT_PUBLIC_PD_API_URL || (isBrowser ? '' : 'http://localhost:8001');
+export const CA_API_URL = process.env.NEXT_PUBLIC_CA_API_URL || (isBrowser ? '' : 'http://localhost:8002');
+export const FILESTORY_API_URL = process.env.NEXT_PUBLIC_FILESTORY_API_URL || (isBrowser ? '' : 'http://localhost:8003');
 
 // ----------------------------------------------------------------------
 // 1. Read / List Operation (Orchestrating PD and CA)
@@ -227,10 +228,10 @@ export async function deleteCategoryGuarded(categoryId) {
 // 6. Microservices Health Check
 // ----------------------------------------------------------------------
 export async function checkMicroservicesHealth() {
-  const checkService = async (name, url) => {
+  const checkService = async (name, url, sub) => {
     try {
       const start = Date.now();
-      const res = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(3000) });
+      const endpoint = url ? `${url}/api/health` : `/api/health/${sub}`; const res = await fetch(endpoint, { signal: AbortSignal.timeout(3000) });
       const latency = Date.now() - start;
       if (res.ok) {
         const data = await res.json();
@@ -243,9 +244,9 @@ export async function checkMicroservicesHealth() {
   };
 
   const [pd, ca, fileStory] = await Promise.all([
-    checkService('PD', PD_API_URL),
-    checkService('CA', CA_API_URL),
-    checkService('FileStory', FILESTORY_API_URL)
+    checkService('PD', PD_API_URL, 'pd'),
+    checkService('CA', CA_API_URL, 'ca'),
+    checkService('FileStory', FILESTORY_API_URL, 'filestory')
   ]);
 
   return { pd, ca, fileStory };
